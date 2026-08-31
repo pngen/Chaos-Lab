@@ -55,3 +55,41 @@ allowed temp root, allowed PID set, process/socket/restart/disk caps). The
 controller only ever kills processes it launched. Persistence mutation operates on
 campaign-owned copies. Proxy state never enters the target runtime's internal
 state.
+
+## Completing modules
+
+- **Resource accounting** (resource.h / resource.cpp): a ResourceBaseline /
+  ResourceDelta tracker records before/peak/after counts for owned child
+  processes, sockets, host and device bytes, temp files and threads, and issues a
+  clean/leak verdict. The SafetyEnvelope tracks peak child/socket counts.
+- **Assertion evaluator** (assertions.h / assertions.cpp): every ASSERT_* kind is
+  executable via evaluate_assertion(AssertionSpec, RunFacts, phase), producing a
+  deterministic AssertionResult (expected/observed/target/phase/evidence/pass).
+- **Coordinator death**: the worker reconnects and re-registers on coordinator
+  loss; a dedicated coordinator-death campaign terminates coordinator A as a real
+  process, launches coordinator B at an advanced epoch, proves stale authority is
+  rejected and fresh work succeeds under one authority domain.
+- **Restart storms**: bounded worker, coordinator and alternating worker storms
+  with fresh WorkerBootId each iteration, stale-boot rejection and no leak.
+- **State races**: deterministic adversarial interleavings (COMPLETE vs death,
+  cancel/retry vs stale completion) that assert invariants (no double commit, no
+  stale mutation, no leak, no split authority) over whichever legal outcome
+  occurred.
+- **CUDA scenarios**: allocation pressure (A), process death during GPU work (B),
+  host verification failure with retry and CPU parity (C), transport ambiguity
+  around a dropped completion via the real interposer (D), and 25x cold restart
+  with exact device-memory baseline return (E).
+- **Transport coverage**: drop, corrupt, truncate, duplicate, delay, close and
+  reconnect are all exercised on real loopback TCP through the interposer.
+- **Persistence during recovery**: save, kill the owning process, reload in a
+  fresh process, and prove recovery generation is monotonic and stale ownership
+  does not resurrect.
+- **Concurrency**: EvidenceRecorder is thread-safe and stressed under high
+  contention; proxy forwarders are single-writer per connection.
+
+## Physical boundaries
+
+Chaos Lab does not fabricate physical hardware faults. It never claims GPU device
+reset, Xid injection, ECC, PCIe or NVLink physical failure, thermal faults, or real
+multi-GPU behaviour unless actually performed. Those remain genuine
+physical/environmental boundaries, distinct from software closure.

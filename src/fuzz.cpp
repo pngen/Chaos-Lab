@@ -8,7 +8,7 @@
 namespace chaoslab {
 
 namespace {
-constexpr std::array<FaultCategory, 14> kPool = {
+constexpr std::array<FaultCategory, 20> kPool = {
   FaultCategory::WORKER_DEATH,
   FaultCategory::COORDINATOR_DEATH,
   FaultCategory::STALE_EPOCH,
@@ -22,7 +22,13 @@ constexpr std::array<FaultCategory, 14> kPool = {
   FaultCategory::RESOURCE_EXHAUSTION,
   FaultCategory::CONNECTION_DROP,
   FaultCategory::FRAME_CORRUPTION,
-  FaultCategory::RECOVERY_FAILURE
+  FaultCategory::RECOVERY_FAILURE,
+  FaultCategory::COORDINATOR_DEATH,
+  FaultCategory::SOCKET_CLOSE,
+  FaultCategory::FRAME_TRUNCATION,
+  FaultCategory::BAD_CHECKSUM,
+  FaultCategory::PARTIAL_FILE_WRITE,
+  FaultCategory::DEVICE_MEMORY_PRESSURE
 };
 
 FaultScope scope_for(FaultCategory c) {

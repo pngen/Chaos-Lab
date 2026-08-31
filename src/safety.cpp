@@ -43,6 +43,7 @@ Status SafetyEnvelope::acquire_child() {
                          "child process cap reached (" + std::to_string(env_.max_child_processes) + ")");
   }
   ++child_count_;
+  if (child_count_ > peak_child_count_) peak_child_count_ = child_count_;
   return Status::ok();
 }
 
@@ -63,6 +64,7 @@ Status SafetyEnvelope::acquire_socket() {
                          "open socket cap reached (" + std::to_string(env_.max_open_sockets) + ")");
   }
   ++socket_count_;
+  if (socket_count_ > peak_socket_count_) peak_socket_count_ = socket_count_;
   return Status::ok();
 }
 

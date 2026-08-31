@@ -30,6 +30,28 @@ std::string json_escape(std::string_view v) {
 }
 } // namespace
 
+std::string esc(std::string_view v) {
+  std::string o; o.reserve(v.size());
+  for (char c : v) {
+    if (c == '\n') o += "\\n"; else if (c == '\r') o += "\\r"; else if (c == '|') o += "\\|"; else o += c;
+  }
+  return o;
+}
+
+std::string unesc(std::string_view v) {
+  std::string o; o.reserve(v.size());
+  for (std::size_t i = 0; i < v.size(); ++i) {
+    if (v[i] == '\\' && i + 1 < v.size()) {
+      char n = v[i + 1];
+      if (n == 'n') { o += '\n'; ++i; }
+      else if (n == 'r') { o += '\r'; ++i; }
+      else if (n == '|') { o += '|'; ++i; }
+      else { o += v[i]; }
+    } else o += v[i];
+  }
+  return o;
+}
+
 const char* evidence_kind_name(EvidenceKind k) noexcept {
   auto i = static_cast<std::size_t>(k);
   return i < kKindNames.size() ? kKindNames[i] : "unknown";
@@ -54,16 +76,25 @@ std::string EvidenceRecord::to_text() const {
   for (auto& [k, v] : fields) {
     if (!first) out.push_back(',');
     first = false;
-    out += k; out.push_back('='); out += v;
+    out += esc(k); out.push_back('='); out += esc(v);
   }
   out.push_back('|');
-  out += payload;
+  out += esc(payload);
   return out;
 }
+
+std::vector<EvidenceRecord> EvidenceRecorder::snapshot() const {
+  std::lock_guard<std::mutex> lk(mtx_);
+  return records_;
+}
+bool EvidenceRecorder::empty() const noexcept { std::lock_guard<std::mutex> lk(mtx_); return records_.empty(); }
+std::size_t EvidenceRecorder::size() const noexcept { std::lock_guard<std::mutex> lk(mtx_); return records_.size(); }
+std::int64_t EvidenceRecorder::next_seq() const noexcept { std::lock_guard<std::mutex> lk(mtx_); return next_seq_; }
 
 EvidenceId EvidenceRecorder::record(EvidenceKind kind, std::string phase,
                                     std::map<std::string, std::string> fields,
                                     std::string payload) {
+  std::lock_guard<std::mutex> lk(mtx_);
   EvidenceRecord ev;
   ev.id = EvidenceId(static_cast<std::uint64_t>(next_seq_ + 1));
   ev.kind = kind;
@@ -76,11 +107,13 @@ EvidenceId EvidenceRecorder::record(EvidenceKind kind, std::string phase,
 }
 
 void EvidenceRecorder::record_raw(EvidenceRecord ev) {
+  std::lock_guard<std::mutex> lk(mtx_);
   if (ev.seq >= next_seq_) next_seq_ = ev.seq + 1;
   records_.push_back(std::move(ev));
 }
 
 std::string EvidenceRecorder::serialize_text() const {
+  std::lock_guard<std::mutex> lk(mtx_);
   std::string out;
   for (auto& ev : records_) {
     out += to_hex(ev.id.value());
@@ -105,6 +138,7 @@ void json_number(std::string& out, std::string_view name, std::uint64_t v) {
 } // namespace
 
 std::string EvidenceRecorder::serialize_json() const {
+  std::lock_guard<std::mutex> lk(mtx_);
   std::string out = "[";
   bool first = true;
   for (auto& ev : records_) {
@@ -139,6 +173,7 @@ std::string EvidenceRecorder::serialize_json() const {
 }
 
 Digest256 EvidenceRecorder::digest() const {
+  std::lock_guard<std::mutex> lk(mtx_);
   Sha256 h;
   for (auto& ev : records_) {
     h.update(ev.to_text());
@@ -169,15 +204,15 @@ bool EvidenceRecorder::parse_text(std::string_view text, std::vector<EvidenceRec
     ev.seq = static_cast<std::int64_t>(seq);
     ev.kind = EvidenceKind::MISC;
     for (std::size_t i = 0; i < kKindNames.size(); ++i) if (parts[1] == kKindNames[i]) { ev.kind = static_cast<EvidenceKind>(i); break; }
-    ev.phase = parts[2];
+    ev.phase = unesc(parts[2]);
     if (!parts[3].empty()) {
       for (auto& item : split(parts[3], ',')) {
         std::size_t eq = item.find('=');
         if (eq == std::string::npos) return false;
-        ev.fields[item.substr(0, eq)] = item.substr(eq + 1);
+        ev.fields[unesc(item.substr(0, eq))] = unesc(item.substr(eq + 1));
       }
     }
-    ev.payload = parts[4];
+    ev.payload = unesc(parts[4]);
     out.push_back(std::move(ev));
   }
   return true;

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace chaoslab {
 
@@ -59,5 +60,48 @@ private:
 /// target. Returns a container of live allocations so callers can release them.
 Status apply_host_pressure(std::uint64_t target_bytes, std::uint64_t cap_bytes,
                            std::vector<HostAllocation>& out, std::uint64_t& total);
+
+/// Counts of observable owned resources for a campaign or subsystem.
+struct ResourceCounts {
+  std::uint64_t child_processes{0};
+  std::uint64_t open_sockets{0};
+  std::uint64_t host_bytes{0};
+  std::uint64_t device_bytes{0};
+  std::uint64_t temp_files{0};
+  std::uint64_t threads{0};
+};
+
+/// Before / peak / after resource accounting and a leak verdict.
+struct ResourceBaseline {
+  ResourceCounts before;
+  ResourceCounts peak;
+  ResourceCounts after;
+  bool leak{false};
+  std::vector<std::string> notes;
+
+  /// Deterministic multi-line delta report.
+  std::string delta_report() const;
+  /// One-line summary.
+  std::string to_text() const;
+};
+
+/// Tracks observable resources across a campaign and produces a baseline/delta.
+class ResourceBaselineTracker {
+public:
+  /// Observe a current snapshot. The first call records the baseline.
+  void observe(const ResourceCounts& now);
+  void note(std::string text) { baseline_.notes.push_back(std::move(text)); }
+
+  const ResourceBaseline& baseline() const noexcept { return baseline_; }
+  bool captured() const noexcept { return captured_; }
+  bool leak() const noexcept { return baseline_.leak; }
+
+  /// A convenience: the observed-after resource count.
+  const ResourceCounts& after() const noexcept { return baseline_.after; }
+
+private:
+  ResourceBaseline baseline_;
+  bool captured_{false};
+};
 
 } // namespace chaoslab

@@ -173,6 +173,20 @@ toolchain. Configure and build with CMake, then drive campaigns through the
 Install the library/headers and exported CMake targets with `cmake --install`,
 then consume via `find_package(ChaosLab)`. See EXAMPLES.md.
 
+## Campaigns and proofs
+
+Chaos Lab ships dedicated real OS-process campaigns, each producing evidence and
+evaluating assertions: the multiprocess closure proof, a coordinator-death/failover
+campaign, worker and coordinator restart storms, deterministic state-race
+campaigns, expanded transport chaos (drop/corrupt/truncate/duplicate/delay/close/
+reconnect) on loopback TCP, persistence corruption and persistence-during-recovery,
+bounded host resource pressure, fixed-seed randomized campaigns with reduction, an
+executable assertion evaluator over every ASSERT_* kind, evidence replay/compare
+closure, and CUDA scenarios A (allocation pressure), B (worker death during GPU
+work), C (verification failure), D (transport ambiguity) and E (repeated cold
+restart) on an RTX 5090. Resource accounting tracks before/peak/after and issues a
+clean/leak verdict for every campaign.
+
 ## License
 
 Apache License 2.0. Copyright 2026 Summon Software Labs. No telemetry transmission.

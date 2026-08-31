@@ -22,7 +22,11 @@ double ns_to_ms(clk::steady_clock::duration d) {
 }
 
 int main() {
+#ifdef NDEBUG
+  std::printf("Chaos Lab benchmark (Release)\n");
+#else
   std::printf("Chaos Lab benchmark (Debug)\n");
+#endif
 
   // 1. Evidence ingestion.
   {

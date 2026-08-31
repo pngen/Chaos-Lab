@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,9 +53,11 @@ public:
   void record_raw(EvidenceRecord ev);
 
   const std::vector<EvidenceRecord>& records() const noexcept { return records_; }
-  bool empty() const noexcept { return records_.empty(); }
-  std::size_t size() const noexcept { return records_.size(); }
-  std::int64_t next_seq() const noexcept { return next_seq_; }
+  /// Thread-safe snapshot (copy) of the recorded records.
+  std::vector<EvidenceRecord> snapshot() const;
+  bool empty() const noexcept;
+  std::size_t size() const noexcept;
+  std::int64_t next_seq() const noexcept;
 
   /// Deterministic text serialization.
   std::string serialize_text() const;
@@ -72,6 +75,7 @@ public:
 private:
   std::vector<EvidenceRecord> records_;
   std::int64_t next_seq_{0};
+  mutable std::mutex mtx_;   // makes concurrent recording + digest safe
 };
 
 } // namespace chaoslab

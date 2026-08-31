@@ -1,6 +1,9 @@
 
 # Dependency-free deterministic test harness. No timeouts / watchdogs.
 set(CHAOS_UNIT_TESTS
+  test_concurrency
+  test_assertion_eval
+  test_resource_baseline
   test_identities
   test_campaign
   test_scheduler

@@ -59,3 +59,42 @@ are exercised by the evidence/replay unit tests:
 ## Repeat
 
     chaos multiprocess --count 25
+
+## Coordinator death and failover
+
+    chaos coordinator-death --count 3
+
+## Restart storms
+
+    chaos storm-worker --count 25
+    chaos storm-coordinator --count 10
+
+## State races
+
+    chaos race complete-vs-death
+
+## Expanded transport chaos
+
+    chaos transport
+
+## Persistence during active recovery
+
+    chaos persistence-recovery
+
+## Randomized / fixed-seed campaigns
+
+    chaos fuzz 0xABCD
+
+## Evidence replay closure
+
+    chaos compare-runs
+
+## Assertion evaluator
+
+    chaos assert
+
+## CUDA scenarios
+
+    chaos cuda-verify   # verification failure (C)
+    chaos cuda-transport # transport ambiguity (D)
+    chaos cuda-restart --count 25 # repeated cold restart (E)

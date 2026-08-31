@@ -36,6 +36,7 @@ public:
   Status acquire_child();
   void release_child() noexcept;
   int child_count() const noexcept { return child_count_; }
+  int peak_child_count() const noexcept { return peak_child_count_; }
   bool can_spawn_more() const noexcept;
 
   /// Register an owned target id.
@@ -46,6 +47,7 @@ public:
   Status acquire_socket();
   void release_socket() noexcept;
   int socket_count() const noexcept { return socket_count_; }
+  int peak_socket_count() const noexcept { return peak_socket_count_; }
 
   /// Track a restart; cap enforced.
   Status acquire_restart();
@@ -61,6 +63,8 @@ private:
   int child_count_{0};
   int socket_count_{0};
   int restart_count_{0};
+  int peak_child_count_{0};
+  int peak_socket_count_{0};
 };
 
 } // namespace chaoslab

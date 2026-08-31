@@ -6,10 +6,12 @@
 #include "chaoslab/cuda.h"
 #endif
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace chaoslab;
@@ -20,6 +22,7 @@ std::string g_name = "worker";
 std::uint64_t g_id = 1;
 std::uint64_t g_boot = 1;
 bool g_cuda = false;
+bool g_smoke = false;
 
 std::string do_work(const std::string& work) {
   // Deterministic result: hashes the work payload plus the worker's boot id so
@@ -89,29 +92,60 @@ int main(int argc, char** argv) {
     else if (a == "--id" && i + 1 < argc) g_id = std::stoull(argv[++i]);
     else if (a == "--boot" && i + 1 < argc) g_boot = std::stoull(argv[++i]);
     else if (a == "--cuda") g_cuda = true;
+    else if (a == "--smoke") g_smoke = true;
+  }
+  if (g_smoke) {
+    if (tcp_init().failed()) { printf("ERR|tcp_init\n"); return 2; }
+#ifdef CHAOSLAB_HAS_CUDA
+    bool ok = cuda_roundtrip();
+    printf("SMOKE|result=%d\n", ok ? 1 : 0); fflush(stdout);
+    tcp_shutdown();
+    return ok ? 0 : 1;
+#else
+    printf("SMOKE|no_cuda\n"); fflush(stdout);
+    tcp_shutdown();
+    return 1;
+#endif
   }
   if (coord_port == 0) { printf("ERR|no_coord\n"); return 2; }
   if (tcp_init().failed()) { printf("ERR|tcp_init\n"); return 2; }
-  int fd = -1;
-  if (tcp_connect(coord_host, coord_port, fd).failed()) { printf("ERR|connect\n"); return 3; }
-  printf("CONNECT|id=%llu;boot=%llu\n", (unsigned long long)g_id, (unsigned long long)g_boot); fflush(stdout);
-  proto::send_frame(fd, proto::MsgType::REGISTER, g_name + "|" + std::to_string(g_id) + "|" + std::to_string(g_boot));
+  // Reconnect/re-register on coordinator loss so the worker survives coordinator
+  // restarts and failover. Bounded attempt count; no test timeout semantics.
+  int attempts = 0;
+  while (attempts < 200) {
+    int fd = -1;
+    if (tcp_connect(coord_host, coord_port, fd).failed()) {
+      ++attempts;
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      continue;
+    }
+    printf("CONNECT|id=%llu;boot=%llu\n", (unsigned long long)g_id, (unsigned long long)g_boot); fflush(stdout);
+    proto::send_frame(fd, proto::MsgType::REGISTER, g_name + "|" + std::to_string(g_id) + "|" + std::to_string(g_boot));
 
-  while (true) {
-    std::uint32_t type = 0; std::string payload;
-    Status s = proto::recv_frame(fd, type, payload);
-    if (s.failed()) break;
-    switch (type) {
-      case proto::MsgType::DISPATCH: handle_dispatch(payload, fd); break;
-      case proto::MsgType::COMPLETE_ACK: printf("ACK|%s\n", payload.c_str()); fflush(stdout); break;
-      case proto::MsgType::COMPLETE_REJECTED: printf("REJECTED|%s\n", payload.c_str()); fflush(stdout); break;
-      case proto::MsgType::REGISTERED: printf("REGISTERED|epoch=%s\n", payload.c_str()); fflush(stdout); break;
-      case proto::MsgType::PING: proto::send_frame(fd, proto::MsgType::PONG, "pong"); break;
-      case proto::MsgType::SHUTDOWN: tcp_close(fd); tcp_shutdown(); return 0;
-      default: break;
+    bool lost = false;
+    while (true) {
+      std::uint32_t type = 0; std::string payload;
+      Status s = proto::recv_frame(fd, type, payload);
+      if (s.failed()) { lost = true; break; }
+      switch (type) {
+        case proto::MsgType::DISPATCH: handle_dispatch(payload, fd); break;
+        case proto::MsgType::COMPLETE_ACK: printf("ACK|%s\n", payload.c_str()); fflush(stdout); break;
+        case proto::MsgType::COMPLETE_REJECTED: printf("REJECTED|%s\n", payload.c_str()); fflush(stdout); break;
+        case proto::MsgType::REGISTERED: printf("REGISTERED|epoch=%s\n", payload.c_str()); fflush(stdout); break;
+        case proto::MsgType::PING: proto::send_frame(fd, proto::MsgType::PONG, "pong"); break;
+        case proto::MsgType::SHUTDOWN: tcp_close(fd); tcp_shutdown(); return 0;
+        default: break;
+      }
+    }
+    tcp_close(fd);
+    if (lost) {
+      printf("LOST|id=%llu;boot=%llu\n", (unsigned long long)g_id, (unsigned long long)g_boot); fflush(stdout);
+      ++attempts;
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    } else {
+      break; // clean shutdown path
     }
   }
-  tcp_close(fd);
   tcp_shutdown();
   return 0;
 }
