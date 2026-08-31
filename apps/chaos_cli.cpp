@@ -710,6 +710,50 @@ int cmd_storm_coordinator(int count) {
 }
 
 
+int cmd_storm_alternate(int count) {
+  std::uint16_t port = 0; proto::pick_ephemeral_port(port);
+  Process coord, a, b;
+  std::string out;
+  if (Process::launch("target_coordinator", {"--port", std::to_string(port)}, "", {}, coord).failed()) return 0;
+  std::uint16_t lp = coord_port_from(coord, out);
+  std::uint64_t boot_a = 1000, boot_b = 2000;
+  if (Process::launch("target_worker", {"--coord", "127.0.0.1:" + std::to_string(lp), "--name", "A", "--id", "1", "--boot", std::to_string(boot_a)}, "", {}, a).failed()) { force_kill(coord); return 0; }
+  if (Process::launch("target_worker", {"--coord", "127.0.0.1:" + std::to_string(lp), "--name", "B", "--id", "2", "--boot", std::to_string(boot_b)}, "", {}, b).failed()) { force_kill(coord); force_kill(a); return 0; }
+  wait_stdout(coord, out, "BOOT|worker=1"); wait_stdout(coord, out, "BOOT|worker=2");
+  int ctl = -1; if (tcp_connect("127.0.0.1", lp, ctl).failed()) { force_kill(coord); force_kill(a); force_kill(b); return 0; }
+  int pass = 0;
+  for (int i = 0; i < count; ++i) {
+    int tgt = (i % 2 == 0) ? 1 : 2;
+    int other = 3 - tgt;
+    // Fresh service progress on the surviving worker.
+    SubmitResult fr = submit(coord, out, ctl, other, "alive" + std::to_string(i));
+    bool comp = fr.ok && wait_stdout(coord, out, "attempt=" + std::to_string(fr.attempt) + ";gen=" + std::to_string(fr.gen));
+    // Kill the target worker and relaunch it with a fresh, per-worker boot id.
+    bool stale_rej = false;
+    if (tgt == 1) {
+      force_kill(a); boot_a += 1;
+      Process n; if (Process::launch("target_worker", {"--coord", "127.0.0.1:" + std::to_string(lp), "--name", "A", "--id", "1", "--boot", std::to_string(boot_a)}, "", {}, n).failed()) { force_kill(b); force_kill(coord); break; }
+      a = std::move(n);
+      wait_stdout(coord, out, "boot=" + std::to_string(boot_a));
+      auto old = send_complete(ctl, fr.epoch, fr.attempt, fr.gen, fr.dispatch, 1, boot_a - 1, "old");
+      stale_rej = !old.accepted;
+    } else {
+      force_kill(b); boot_b += 1;
+      Process n; if (Process::launch("target_worker", {"--coord", "127.0.0.1:" + std::to_string(lp), "--name", "B", "--id", "2", "--boot", std::to_string(boot_b)}, "", {}, n).failed()) { force_kill(a); force_kill(coord); break; }
+      b = std::move(n);
+      wait_stdout(coord, out, "boot=" + std::to_string(boot_b));
+      auto old = send_complete(ctl, fr.epoch, fr.attempt, fr.gen, fr.dispatch, 2, boot_b - 1, "old");
+      stale_rej = !old.accepted;
+    }
+    if (comp && stale_rej) ++pass;
+  }
+  force_kill(a); force_kill(b); force_kill(coord); if (ctl >= 0) tcp_close(ctl);
+  bool no_leak = !a.alive() && !b.alive() && !coord.alive();
+  std::printf("storm_alternate pass=%d/%d leak=%d\n", pass, count, no_leak ? 0 : 1);
+  return (pass == count && no_leak) ? 1 : 0;
+}
+
+
 int cmd_cuda_verify() {
 #ifdef CHAOSLAB_HAS_CUDA
   DeviceInfo info;
@@ -906,25 +950,46 @@ int cmd_race(const std::string& name) {
   wait_stdout(coord, out, "BOOT|worker=1");
   int ctl = -1; if (tcp_connect("127.0.0.1", lp, ctl).failed()) { force_kill(coord); force_kill(w); return 1; }
   SubmitResult sr = submit(coord, out, ctl, 1, "race");
-  force_kill(w);
   bool accepted_seen = out.find("ACCEPTED") != std::string::npos;
+  bool no_double = true;
+  if (name == "retry-vs-stale" || name == "cancel-vs-complete" || name == "duplicate-vs-complete") {
+    // Wait for the authoritative completion to commit, then deterministically
+    // replay the SAME authority. The coordinator must reject the duplicate
+    // (conflicting result) — a committed op is never double-committed.
+    bool committed = wait_stdout(coord, out, "attempt=" + std::to_string(sr.attempt) + ";gen=" + std::to_string(sr.gen));
+    auto d = send_complete(ctl, sr.epoch, sr.attempt, sr.gen, sr.dispatch, 1, 300, "race2");
+    no_double = committed && !d.accepted;
+    force_kill(w);
+  } else if (name == "epoch-roll-vs-arrival" || name == "failover-vs-old-completion") {
+    // Roll the epoch by restarting the coordinator at sr.epoch+1; the preserved
+    // completion under the old epoch becomes stale.
+    force_kill(coord);
+    Process c2; Process::launch("target_coordinator", {"--port", std::to_string(port), "--epoch", std::to_string(sr.epoch + 1)}, "", {}, c2);
+    std::string out2; std::uint16_t lp2 = coord_port_from(c2, out2);
+    coord = std::move(c2);
+    if (ctl >= 0) tcp_close(ctl); ctl = -1;
+    if (tcp_connect("127.0.0.1", lp2, ctl).failed()) { force_kill(w); force_kill(coord); return 1; }
+    out = out2;
+    wait_stdout(coord, out, "boot=300");
+  } else {
+    // COMPLETE vs worker death: kill the worker to race the completion.
+    force_kill(w);
+  }
   if (Process::launch("target_worker", {"--coord", "127.0.0.1:" + std::to_string(lp), "--name", "W", "--id", "1", "--boot", "301"}, "", {}, w2).failed()) { force_kill(coord); return 1; }
   wait_stdout(coord, out, "boot=301");
   SubmitResult fr = submit(coord, out, ctl, 1, "fresh");
   bool fresh_ok = fr.ok && wait_stdout(coord, out, "attempt=" + std::to_string(fr.attempt) + ";gen=" + std::to_string(fr.gen));
   auto old = send_complete(ctl, sr.epoch, sr.attempt, sr.gen, sr.dispatch, 1, 300, "race");
   bool stale_rejected = !old.accepted;
-  // No double commit: the raced operation (sr authority) must appear as AT MOST
-  // one ACCEPTED (the coordinator rejects duplicate completions).
   std::string sr_marker = ";attempt=" + std::to_string(sr.attempt) + ";gen=" + std::to_string(sr.gen);
   std::size_t sr_commits = 0; std::size_t p = 0;
   while ((p = out.find(sr_marker, p)) != std::string::npos) { ++sr_commits; p += sr_marker.size(); }
-  bool no_double = (sr_commits <= 1);
+  bool no_double_commit = no_double && (sr_commits <= 1);
   force_kill(w2); force_kill(coord); if (ctl >= 0) tcp_close(ctl);
   bool no_leak = !w2.alive() && !coord.alive();
-  bool pass = fresh_ok && stale_rejected && no_double && no_leak;
+  bool pass = fresh_ok && stale_rejected && no_double_commit && no_leak;
   std::printf("race_%s accepted=%d fresh=%d stale_rej=%d no_double=%d leak=%d\n", name.c_str(),
-              accepted_seen ? 1 : 0, fresh_ok ? 1 : 0, stale_rejected ? 1 : 0, no_double ? 1 : 0, no_leak ? 0 : 1);
+              accepted_seen ? 1 : 0, fresh_ok ? 1 : 0, stale_rejected ? 1 : 0, no_double_commit ? 1 : 0, no_leak ? 0 : 1);
   return pass ? 0 : 1;
 }
 
@@ -1055,6 +1120,12 @@ int main(int argc, char** argv) {
   if (cmd == "storm-coordinator") {
     int count = 10; for (int i = 2; i < argc; ++i) if (std::string(argv[i]) == "--count" && i + 1 < argc) count = std::atoi(argv[++i]);
     int p = cmd_storm_coordinator(count);
+    tcp_shutdown();
+    return p ? 0 : 1;
+  }
+  if (cmd == "storm-alternate") {
+    int count = 20; for (int i = 2; i < argc; ++i) if (std::string(argv[i]) == "--count" && i + 1 < argc) count = std::atoi(argv[++i]);
+    int p = cmd_storm_alternate(count);
     tcp_shutdown();
     return p ? 0 : 1;
   }
