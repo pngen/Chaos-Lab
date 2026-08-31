@@ -139,7 +139,7 @@ assertions, state snapshots, authority envelopes, persistence digests, recovery
 events, cleanup and the final result) in deterministic text and JSON. Replay
 modes are PLAN_REPLAY (reproduce injections against a fresh target run),
 EVIDENCE_REPLAY (recompute assertions and digests without launching targets) and
-COMPARE (compare two runs). No screenshots are required.
+COMPARE (compare two runs).
 
 ## Safety envelope
 
