@@ -1,0 +1,9 @@
+# Build directories
+/build*/
+/stage/
+# Campaign evidence output
+/evidence/
+# Local logs and ad-hoc dev helper files
+/*.log
+/_*.bat
+/_*.cpp

@@ -1,0 +1,16 @@
+Chaos Lab
+
+Copyright © Summon Software Labs
+
+Chaos Lab is an open-source, vendor-neutral adversarial systems laboratory for deterministic failure injection, fault campaigns, process death, transport disruption, persistence corruption, resource exhaustion, stale authority, restart behavior, and recovery validation across distributed AI infrastructure.
+
+This product is licensed under the Apache License, Version 2.0. See the
+LICENSE file in this distribution for the full license text.
+
+Chaos Lab does not collect or transmit any telemetry. All telemetry is
+written to local files chosen by the operator and never leaves the machine
+running the software.
+
+Chaos Lab accepts contributions from individuals and organizations on the
+terms of the Apache License 2.0 without requiring a Contributor License
+Agreement (CLA). See CONTRIBUTING.md for contribution guidance.
